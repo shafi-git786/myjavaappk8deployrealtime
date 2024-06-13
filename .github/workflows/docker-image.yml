@@ -1,0 +1,28 @@
+name: 1) Docker Image CI
+
+on:
+  workflow_dispatch:
+  push:
+    branches: 
+      - main
+      - feature/**
+
+env:
+  IMAGE_NAME: krogertechnology-docker-dev.jfrog.io/isa
+  APP_NAME: shipperxplod
+
+jobs:
+
+  build:
+
+    runs-on: [self-hosted, Linux, X64, tsa, kroger]
+
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v2.2.0
+    - name: Repo Login
+      run: docker login krogertechnology-docker-dev.jfrog.io --username ${{ secrets.JFROG_USERNAME }} --password ${{ secrets.JFROG_API_KEY }}
+    - name: Build Docker Image
+      run: docker build -t ${{env.IMAGE_NAME}}/${{env.APP_NAME}}:${{ github.event.head_commit.id }} .
+    - name: Push Docker Image
+      run: docker push ${{env.IMAGE_NAME}}/${{env.APP_NAME}}:${{ github.event.head_commit.id }}
