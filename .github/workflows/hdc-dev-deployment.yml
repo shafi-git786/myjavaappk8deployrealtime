@@ -1,0 +1,74 @@
+name: AZURE K8S Dev Deploy
+
+# Controls  when the action will run. Workflow runs when manually triggered using the UI
+# or API.
+on:
+  workflow_dispatch:
+    # Inputs the workflow accepts.
+    inputs:
+      name:
+        # Friendly description to be shown in the UI instead of 'name'
+        description: 'Trigger k8s deployment'
+        # Default value if no value is explicitly provided
+        default: 'shipperxplod'
+        # Input has to be provided for the workflow to run
+        required: false
+      commit_id:
+        description: 'Commit hash to deploy'
+        required: true
+
+env:
+  HELM_VERSION: '3.4.0'
+  APPLICATION_NAME: shipper
+  HELM_CHART_NAME: shipperxplod
+  KUBECONFIG: /tmp/config
+  
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, tsa]
+
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v2
+
+    # Setup Helm
+    - name: Install Helm
+      uses: azure/setup-helm@v3
+      with:
+          version: ${{ env.HELM_VERSION }}
+
+    # Deploy Helm chart
+    - name: Deploy
+      run: |
+        COMMITID=${{ github.event.inputs.commit_id }}
+
+        if [ -z $COMMITID ]
+        then
+          git_hash=$(git rev-parse "$GITHUB_SHA")
+          echo "$git_hash"
+        else
+          git_hash=${{ github.event.inputs.commit_id }}
+          echo "$git_hash"
+        fi
+
+        DEPLOY_ENV=`echo DEV | tr [:upper:] [:lower:]`
+        KRYPT=${{ secrets.DEV_KRYPT }}
+        KRYPT="$(<<< "$KRYPT" sed -e 's`[][\\/.*^$]`\\&`g')"
+        touch /tmp/config
+        echo "${{ secrets.KUBE_AZURE_AKS_CONFIG_DEV }}" | base64 -d >> /tmp/config
+        NAMESPACE=shipperxpld-dev
+        echo "Deploying to $DEPLOY_ENV\n ENV"
+        echo "Helm ugrade namespace is $NAMESPACE"
+        helm upgrade --install \
+        ${{ env.HELM_CHART_NAME }} ${{ github.workspace}}/scripts/deploy/helm/charts \
+            --values ${{ github.workspace }}/scripts/deploy/helm/charts/$DEPLOY_ENV-k8s-values.yaml \
+            --set image.tag=$git_hash \
+            --namespace $NAMESPACE \
+            --kubeconfig /tmp/config
+
+
+            
+    - name: Cleanup Resource files
+      run: |
+        rm -f /tmp/config /tmp/vcap_application /tmp/vcap_services
