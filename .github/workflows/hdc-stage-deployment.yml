@@ -1,0 +1,107 @@
+name: AZURE K8S Stage Deploy
+
+# Controls when the action will run. Workflow runs when manually triggered using the UI
+# or API.
+on:
+  workflow_dispatch:
+    # Inputs the workflow accepts.
+    inputs:
+      name:
+        # Friendly description to be shown in the UI instead of 'name'
+        description: 'Trigger k8s deployment'
+        # Default value if no value is explicitly provided
+        default: 'shipperxplod'
+        # Input has to be provided for the workflow to run
+        required: false
+      commit_id:
+        description: 'Commit hash to deploy'
+        required: true
+
+env:
+  HELM_VERSION: '3.4.0'
+  APPLICATION_NAME: shipper
+  HELM_CHART_NAME: shipperxplod
+  KUBECONFIG: /tmp/config
+  
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, tsa]
+
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v2
+
+    # Setup Helm
+    - name: Install Helm
+      uses: azure/setup-helm@v3
+      with:
+        version: ${{ env.HELM_VERSION }}
+      
+    # Promote docker build dev->test->stage->prod
+    - name: Promote Docker Build to ${{ github.event.inputs.environment }}
+      run: |
+        COMMITID=${{ github.event.inputs.commit_id }}
+
+        if [ -z $COMMITID ]
+        then
+          git_hash=$(git rev-parse "$GITHUB_SHA")
+          echo "$git_hash"
+        else
+          git_hash=${{ github.event.inputs.commit_id }}
+          echo "$git_hash"
+        fi
+
+        pattern=.repository.STAGE
+        json_file=${{ github.workspace}}/.github/workflows/docker-promote-vars.json
+        DOCKER_PULL_REPO=`jq -r "$pattern.pull" "$json_file"`
+        DOCKER_PUSH_REPO=`jq -r "$pattern.push" "$json_file"`
+        PULL_IMAGE=$DOCKER_PULL_REPO/isa/${{ env.HELM_CHART_NAME }}:$git_hash
+        PUSH_IMAGE=$DOCKER_PUSH_REPO/isa/${{ env.HELM_CHART_NAME }}:$git_hash
+        echo $PULL_IMAGE
+        echo $PUSH_IMAGE
+        docker login $DOCKER_PULL_REPO --username ${{ secrets.JFROG_USERNAME }} --password ${{ secrets.JFROG_API_KEY }}
+        docker pull $PULL_IMAGE
+        docker tag $PULL_IMAGE $PUSH_IMAGE  
+        docker login $DOCKER_PUSH_REPO --username ${{ secrets.JFROG_USERNAME }} --password ${{ secrets.JFROG_API_KEY }}
+        docker push $PUSH_IMAGE
+        
+    # Setup Helm
+    - name: Install Helm
+      uses: azure/setup-helm@v1
+      with:
+          version: ${{ env.HELM_VERSION }}
+          
+
+    # Deploy Helm chart
+    - name: Deploy
+      run: |
+        COMMITID=${{ github.event.inputs.commit_id }}
+
+        if [ -z $COMMITID ]
+        then
+          git_hash=$(git rev-parse "$GITHUB_SHA")
+          echo "$git_hash"
+        else
+          git_hash=${{ github.event.inputs.commit_id }}
+          echo "$git_hash"
+        fi
+
+        DEPLOY_ENV=`echo STAGE | tr [:upper:] [:lower:]`
+        KRYPT=${{ secrets.STAGE_KRYPT }}
+        KRYPT="$(<<< "$KRYPT" sed -e 's`[][\\/.*^$]`\\&`g')"
+        touch /tmp/config
+        echo "${{ secrets.KUBE_AZURE_AKS_CONFIG_STAGE }}" | base64 -d >> /tmp/config
+        NAMESPACE=shipperxpld-stage
+        echo "Deploying to $DEPLOY_ENV\n ENV"
+        echo "Helm ugrade namespace is $NAMESPACE"
+        helm upgrade --install \
+        ${{ env.HELM_CHART_NAME }} ${{ github.workspace}}/scripts/deploy/helm/charts \
+            --values ${{ github.workspace }}/scripts/deploy/helm/charts/$DEPLOY_ENV-k8s-values.yaml \
+            --set image.tag=$git_hash \
+            --namespace $NAMESPACE \
+            --kubeconfig /tmp/config
+            
+    - name: Cleanup Resource files
+      run: |
+        rm -f /tmp/config /tmp/vcap_application /tmp/vcap_services
