@@ -1,0 +1,12 @@
+{
+    "repository": {
+      "STAGE": {
+        "pull": "krogertechnology-docker-dev.jfrog.io",
+        "push": "krogertechnology-docker-stage.jfrog.io"
+      },
+      "PROD": {
+        "pull": "krogertechnology-docker-stage.jfrog.io",
+        "push": "krogertechnology-docker-prod.jfrog.io"
+      }
+    }
+  }
