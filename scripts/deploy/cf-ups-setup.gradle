@@ -1,0 +1,253 @@
+import org.cloudfoundry.client.v2.organizations.ListOrganizationsRequest
+import org.cloudfoundry.client.v2.organizations.ListOrganizationsResponse
+import org.cloudfoundry.client.v2.organizations.OrganizationResource
+import org.cloudfoundry.client.v2.spaces.ListSpacesRequest
+import org.cloudfoundry.client.v2.spaces.ListSpacesResponse
+import org.cloudfoundry.client.v2.spaces.SpaceResource
+import org.cloudfoundry.client.v2.userprovidedserviceinstances.CreateUserProvidedServiceInstanceRequest
+import org.cloudfoundry.client.v2.userprovidedserviceinstances.CreateUserProvidedServiceInstanceResponse
+import org.cloudfoundry.client.v2.userprovidedserviceinstances.ListUserProvidedServiceInstancesRequest
+import org.cloudfoundry.client.v2.userprovidedserviceinstances.ListUserProvidedServiceInstancesResponse
+import org.cloudfoundry.client.v2.userprovidedserviceinstances.UpdateUserProvidedServiceInstanceRequest
+import org.cloudfoundry.client.v2.userprovidedserviceinstances.UpdateUserProvidedServiceInstanceResponse
+import org.cloudfoundry.client.v2.userprovidedserviceinstances.UserProvidedServiceInstanceResource
+import org.cloudfoundry.operations.DefaultCloudFoundryOperations
+import org.cloudfoundry.reactor.DefaultConnectionContext
+import org.cloudfoundry.reactor.client.ReactorCloudFoundryClient
+import org.cloudfoundry.reactor.doppler.ReactorDopplerClient
+import org.cloudfoundry.reactor.tokenprovider.PasswordGrantTokenProvider
+import org.cloudfoundry.reactor.uaa.ReactorUaaClient
+import reactor.core.publisher.Mono
+import org.gradle.internal.*
+import org.gradle.internal.logging.progress.*
+
+
+import java.lang.reflect.Method
+
+apply plugin: 'java'
+apply plugin: 'cf-app'
+
+defaultTasks 'createUserProvidedServices'
+
+buildscript {
+    repositories {
+        maven {
+            url 'http://artifactory.kroger.com/artifactory/plugins-release'
+        }
+    }
+    dependencies {
+        classpath group: 'com.github.pivotalservices', name: 'ya-cf-app-gradle-plugin', version: '1.0.9'
+    }
+}
+
+repositories {
+    maven {
+        url 'http://artifactory.kroger.com/artifactory/plugins-release'
+    }
+}
+
+sourceSets {
+    main {
+        output.resourcesDir = "build/resources"
+    }
+}
+
+dependencies {
+    compile 'org.slf4j:slf4j-api:1.7.21'
+    testCompile 'junit:junit:4.12'
+}
+
+task wrapper(type: Wrapper) {
+    gradleVersion = '3.1'
+    distributionUrl = "http://artifactory.kroger.com/artifactory/gradle-distributions/gradle-${gradleVersion}-all.zip"
+}
+
+
+task createUserProvidedServices(type: CreateUserProvidedServicesTask)
+
+classes.dependsOn createUserProvidedServices
+
+class CreateUserProvidedServicesTask extends DefaultTask {
+
+
+    def showUsage() {
+        System.out.println("USAGE")
+        System.out.println("-Pusername=[ID for CF login] -Ppassword=[password for CF login] -Penv-purpose=[environment to setup] -Penv-file=[relative location of json environment file]")
+        System.out.println("")
+        System.out.println("Example: setup-ups.gradle -Pusername=cfid -Ppassword=cfpass -Penv-purpose=dev -Penv-file=./config/ups-setup.json")
+        System.out.println("")
+    }
+
+    @TaskAction
+    def createUserProvidedServices() {
+
+        logger.info("Starting createUserProvidedServices")
+
+        String username = project.getProperties().get("username")
+        logger.info("username: "+username)
+        if (username == null || username.trim().length() == 0) {
+            showUsage()
+            System.exit(1)
+        }
+
+        String password = project.getProperties().get("password")
+        if (password == null || password.trim().length() == 0) {
+            showUsage()
+            System.exit(1)
+        }
+
+        String environment = project.getProperties().get("env-purpose")
+        logger.info("env-purpose: "+environment)
+        if (environment == null || environment.trim().length() == 0) {
+            showUsage()
+            System.exit(1)
+        }
+
+        logger.info("Reading UPS values")
+
+        String environmentFile = project.getProperties().get("env-file")
+        logger.info("env-file: "+environmentFile)
+        if (environmentFile == null || environmentFile.trim().length() == 0) {
+            showUsage()
+            System.exit(1)
+        }
+
+        FileReader fileReader = new FileReader(environmentFile);
+        def jsonSlurper = new groovy.json.JsonSlurper()
+        def object = jsonSlurper.parse(fileReader)
+
+        for (env in object.environments) {
+            if (env.name == environment) {
+                logger.lifecycle("Setting up env: "+env.name)
+                for (zone in env.zones) {
+                    logger.lifecycle("Setting up zone: "+zone.name)
+                    logger.info("Environment: " + env.name + " Zone: " + zone.name + " Org: " + zone.org + " Space: " + zone.space)
+                    logger.info("Zone api: "+zone.api)
+
+                    ReactorCloudFoundryClient cloudFoundryClient = createCloudFoundryConnection(zone.api, username, password, zone.org, zone.space)
+
+                    def orgId = lookupOrgId(cloudFoundryClient, zone.org)
+                    def spaceId = lookupSpaceId(cloudFoundryClient, zone.space)
+
+                    Map<String, String> upsMap = createMapOfUpsNamesAndIds(cloudFoundryClient, orgId, spaceId)
+
+                    for (ups in zone.userProvidedServices) {
+                        String upsName = ups.name
+                        Map<String, Object> upsCredentialMap = ups.content
+                        for (mapKey in upsCredentialMap.keySet()) {
+                            upsCredentialMap.put(mapKey, replaceEnvironmentVariables(upsCredentialMap.get(mapKey)))
+                        }
+
+                        logger.lifecycle("Setting up UPS "+upsName)
+                        createOrUpdateUps(upsMap, upsName, upsCredentialMap, cloudFoundryClient, spaceId)
+                    }
+                }
+            }
+        }
+
+        logger.info("Completed createUserProvidedServices")
+    }
+
+    private String lookupOrgId(ReactorCloudFoundryClient cloudFoundryClient, String orgName) {
+        ListOrganizationsRequest listOrganizationsRequest = ListOrganizationsRequest.builder()
+                .name(orgName)
+                .build()
+        ListOrganizationsResponse listOrganizationsResponse = cloudFoundryClient.organizations().list(listOrganizationsRequest).block()
+        List<OrganizationResource> organizationResources = listOrganizationsResponse.getResources()
+        String orgId = organizationResources.get(0).getMetadata().getId()
+        logger.debug("Org Id: "+orgId)
+
+        return orgId
+    }
+
+    private String lookupSpaceId(ReactorCloudFoundryClient cloudFoundryClient, String spaceName) {
+        ListSpacesRequest listSpacesRequest = ListSpacesRequest.builder()
+                .name(spaceName)
+                .build()
+        ListSpacesResponse listSpacesResponse = cloudFoundryClient.spaces().list(listSpacesRequest).block()
+        List<SpaceResource> spaceResources = listSpacesResponse.getResources()
+        logger.info("spaceResources "+spaceResources.size());
+        String spaceId = spaceResources.get(0).getMetadata().getId()
+        logger.debug("Space Id: "+spaceId)
+        return spaceId
+    }
+
+    private void createOrUpdateUps(Map<String, String> upsMap, String upsName, Map<String, Object> upsCredentialMap, ReactorCloudFoundryClient cloudFoundryClient, String spaceId) {
+        String upsId = upsMap.get(upsName)
+        if (upsId == null) {
+            // the user provided service does not exist, so we will create it
+            logger.info("Creating service: "+upsName)
+            CreateUserProvidedServiceInstanceRequest createUserProvidedServiceInstanceRequest = CreateUserProvidedServiceInstanceRequest.builder()
+                    .putAllCredentials(upsCredentialMap)
+                    .name(upsName)
+                    .spaceId(spaceId)
+                    .build();
+            Mono<CreateUserProvidedServiceInstanceResponse> createUserProvidedServiceInstanceResponseMono = cloudFoundryClient.userProvidedServiceInstances().create(createUserProvidedServiceInstanceRequest);
+            CreateUserProvidedServiceInstanceResponse createUserProvidedServiceInstanceResponse = createUserProvidedServiceInstanceResponseMono.block();
+            logger.info("New service ID: "+createUserProvidedServiceInstanceResponse.getMetadata().getId());
+        } else {
+            // the user provided service aleady exists, so we will update it
+            logger.info("Updating UPS ID: " + upsId);
+
+            UpdateUserProvidedServiceInstanceRequest updateUserProvidedServiceInstanceRequest = UpdateUserProvidedServiceInstanceRequest.builder()
+                    .userProvidedServiceInstanceId(upsId)
+                    .putAllCredentials(upsCredentialMap)
+                    .build();
+            UpdateUserProvidedServiceInstanceResponse updateUserProvidedServiceInstanceResponse = cloudFoundryClient.userProvidedServiceInstances().update(updateUserProvidedServiceInstanceRequest).block();
+        }
+
+        logger.info("UPS complete");
+    }
+
+    private HashMap<String, String> createMapOfUpsNamesAndIds(ReactorCloudFoundryClient cloudFoundryClient, String orgId, String spaceId) {
+        logger.debug("listing services");
+        ListUserProvidedServiceInstancesResponse serviceInstanceResponse = cloudFoundryClient.userProvidedServiceInstances()
+                .list(ListUserProvidedServiceInstancesRequest.builder()
+                .organizationId(orgId)
+                .spaceId(spaceId)
+                .page(1)
+                .build()).block();
+
+        Iterator<UserProvidedServiceInstanceResource> upsIterator = serviceInstanceResponse.getResources().iterator();
+        UserProvidedServiceInstanceResource userServiceResource = null;
+        Map<String, String> upsMap = new HashMap<String, String>();
+        while (upsIterator.hasNext()) {
+            userServiceResource = upsIterator.next();
+            upsMap.put(userServiceResource.entity.name, userServiceResource.metadata.id)
+        }
+        upsMap
+    }
+
+    private ReactorCloudFoundryClient createCloudFoundryConnection(String api, String username, String password, String org, String space) {
+        DefaultConnectionContext connectionContext = DefaultConnectionContext.builder().apiHost(api).build();
+
+        PasswordGrantTokenProvider tokenProvider = PasswordGrantTokenProvider.builder().password(password).username(username).build();
+
+        ReactorCloudFoundryClient cloudFoundryClient = ReactorCloudFoundryClient.builder().connectionContext(connectionContext).tokenProvider(tokenProvider).build();
+
+        ReactorDopplerClient dopplerClient = ReactorDopplerClient.builder().connectionContext(connectionContext).tokenProvider(tokenProvider).build();
+
+        ReactorUaaClient uaaClient = ReactorUaaClient.builder().connectionContext(connectionContext).tokenProvider(tokenProvider).build();
+
+        DefaultCloudFoundryOperations cloudFoundryOperations = DefaultCloudFoundryOperations.builder()
+                .cloudFoundryClient(cloudFoundryClient)
+                .dopplerClient(dopplerClient)
+                .uaaClient(uaaClient)
+                .organization(org)
+                .space(space)
+                .build();
+        cloudFoundryClient
+    }
+
+    def String replaceEnvironmentVariables(String text) {
+
+        Map<String, String> envMap = System.getenv();
+        for (Map.Entry<String, String> entry : envMap.entrySet()) {
+            String key = entry.getKey();
+            String value = entry.getValue();
+            text = text.replaceAll('\\$\\{' + key + '\\}', value);
+        }
+        return text;
+    }
+
+}
