@@ -1,0 +1,168 @@
+{
+  "environments": [
+    {
+      "name": "dev",
+      "zones": [
+        {
+          "name": "cdc",
+          "api": "api.cfcdcinternaltest.kroger.com",
+          "org": "KIC",
+          "space": "hpcs-3836-dev",
+          "userProvidedServices": [
+            {
+              "name": "hpcs-database",
+              "content": {
+                "username": "${HPCS_DB_USERNAME}",
+                "password": "${HPCS_DB_PASSWORD}",
+                "url": "${HPCS_DB_URL}",
+                "driver": "${HPCS_DB_DRIVER}",
+                "initialize": "false"
+              }
+            }
+          ]
+        },
+        {
+          "name": "hdc",
+          "api": "api.cfhdcinternaltest.kroger.com",
+          "org": "KIC",
+          "space": "hpcs-3836-dev",
+          "userProvidedServices": [
+            {
+              "name": "hpcs-database",
+              "content": {
+                "username": "${HPCS_DB_USERNAME}",
+                "password": "${HPCS_DB_PASSWORD}",
+                "url": "${HPCS_DB_URL}",
+                "driver": "${HPCS_DB_DRIVER}",
+                "initialize": "false"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "test",
+      "zones": [
+        {
+          "name": "cdc",
+          "api": "api.cfcdcinternaltest.kroger.com",
+          "org": "KIC",
+          "space": "hpcs-3836-test",
+          "userProvidedServices": [
+            {
+              "name": "hpcs-database",
+              "content": {
+                "username": "${HPCS_DB_USERNAME}",
+                "password": "${HPCS_DB_PASSWORD}",
+                "url": "${HPCS_DB_URL}",
+                "driver": "${HPCS_DB_DRIVER}",
+                "initialize": "false"
+              }
+            }
+          ]
+        },
+        {
+          "name": "hdc",
+          "api": "api.cfhdcinternaltest.kroger.com",
+          "org": "KIC",
+          "space": "hpcs-3836-test",
+          "userProvidedServices": [
+            {
+              "name": "hpcs-database",
+              "content": {
+                "username": "${HPCS_DB_USERNAME}",
+                "password": "${HPCS_DB_PASSWORD}",
+                "url": "${HPCS_DB_URL}",
+                "driver": "${HPCS_DB_DRIVER}",
+                "initialize": "false"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "qa",
+      "zones": [
+        {
+          "name": "cdc",
+          "api": "api.cfcdcinternaltest.kroger.com",
+          "org": "KIC",
+          "space": "hpcs-3836-stage",
+          "userProvidedServices": [
+            {
+              "name": "hpcs-database",
+              "content": {
+                "username": "${HPCS_DB_USERNAME}",
+                "password": "${HPCS_DB_PASSWORD}",
+                "url": "${HPCS_DB_URL}",
+                "driver": "${HPCS_DB_DRIVER}",
+                "initialize": "false"
+              }
+            }
+          ]
+        },
+        {
+          "name": "hdc",
+          "api": "api.cfhdcinternaltest.kroger.com",
+          "org": "KIC",
+          "space": "hpcs-3836-stage",
+          "userProvidedServices": [
+            {
+              "name": "hpcs-database",
+              "content": {
+                "username": "${HPCS_DB_USERNAME}",
+                "password": "${HPCS_DB_PASSWORD}",
+                "url": "${HPCS_DB_URL}",
+                "driver": "${HPCS_DB_DRIVER}",
+                "initialize": "false"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "prod",
+      "zones": [
+        {
+          "name": "cdc",
+          "api": "api.cfcdcinternal.kroger.com",
+          "org": "KIC",
+          "space": "hpcs-3836-prod",
+          "userProvidedServices": [
+            {
+              "name": "hpcs-database",
+              "content": {
+                "username": "${HPCS_DB_USERNAME}",
+                "password": "${HPCS_DB_PASSWORD}",
+                "url": "${HPCS_DB_URL}",
+                "driver": "${HPCS_DB_DRIVER}",
+                "initialize": "false"
+              }
+            }
+          ]
+        },
+        {
+          "name": "hdc",
+          "api": "api.cfhdcinternal.kroger.com",
+          "org": "KIC",
+          "space": "hpcs-3836-prod",
+          "userProvidedServices": [
+            {
+              "name": "hpcs-database",
+              "content": {
+                "username": "${HPCS_DB_USERNAME}",
+                "password": "${HPCS_DB_PASSWORD}",
+                "url": "${HPCS_DB_URL}",
+                "driver": "${HPCS_DB_DRIVER}",
+                "initialize": "false"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
