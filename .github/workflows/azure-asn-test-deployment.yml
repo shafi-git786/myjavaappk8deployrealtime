@@ -1,0 +1,130 @@
+name: ASN AKs Test Deployment
+
+# Controls when the action will run. Workflow runs when manually triggered using the UI
+# #or API.
+on:
+  workflow_dispatch:
+    # Inputs the workflow accepts.
+  # push:
+  #   branches: 
+  # #     - main
+  #     - feature/**
+
+    inputs:
+      name:
+        # Friendly description to be shown in the UI instead of 'name'
+        description: 'Trigger k8s deployment'
+        # Default value if no value is explicitly provided
+        default: 'ASN'
+        # Input has to be provided for the workflow to run
+        required: false
+      commit_id:
+        description: 'Commit hash to deploy'
+        required: true
+      environment:
+        description: 'Environment to deploy to'
+        required: false
+        default: 'TEST'
+env:
+  HELM_VERSION: '3.4.0'
+  APPLICATION_NAME: asn
+  HELM_CHART_NAME: asn
+  KUBECONFIG: /tmp/config
+  # KUBECONFIG_SECRET: ${{ fromJSON('["KUBE_CONFIG", "PROD_KUBE_CONFIG"]')[github.event.inputs.environment == 'PROD'] }}
+  # KUBECONFIG_SECRET_CDC: ${{ fromJSON('["KUBE_CONFIG_CDC", "PROD_KUBE_CONFIG_CDC"]')[github.event.inputs.environment == 'PROD'] }}
+  VCAP_SVC_SECRET: ${{ github.event.inputs.environment }}_VCAP_SERVICES
+  VCAP_SVC_SECRET_CDC: ${{ github.event.inputs.environment }}_VCAP_SERVICES_CDC
+  VCAP_APP_SECRET: ${{ github.event.inputs.environment }}_VCAP_APPLICATION
+  DOCKER_REGISTRY: krogertechnology-docker-dev.jfrog.io
+  DOCKER_REPO: docker
+
+
+
+jobs:
+  deploy:
+    runs-on: [aks]
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v2
+
+
+    - name: Install Helm
+      uses: azure/setup-helm@v3
+      with:
+        version: ${{ env.HELM_VERSION }}  
+
+    # Promote docker build dev->test->stage->prod
+    - name: Promote Docker Build to ${{ github.event.inputs.environment }}
+      run: |
+        COMMITID='252ff690f0bd446f9c6d2c183bd6c2ded9cb2bcd'
+        echo "Deploying commit $COMMITID"
+        if [ -z $COMMITID ]
+        then
+            git_hash=$(git rev-parse "$GITHUB_SHA")
+            echo "$git_hash"
+        else
+            git_hash='252ff690f0bd446f9c6d2c183bd6c2ded9cb2bcd'
+            echo "$git_hash"
+        fi
+        pattern=.repository.TEST
+        json_file=${{ github.workspace}}/.github/workflows/docker-promote-vars.json
+        DOCKER_PULL_REPO=`jq -r "$pattern.pull" "$json_file"`
+        DOCKER_PUSH_REPO=`jq -r "$pattern.push" "$json_file"`
+        PULL_IMAGE=$DOCKER_PULL_REPO/scmf/${{ env.HELM_CHART_NAME }}:$git_hash
+        PUSH_IMAGE=$DOCKER_PUSH_REPO/scmf/${{ env.HELM_CHART_NAME }}:$git_hash
+        echo $PULL_IMAGE
+        echo $PUSH_IMAGE
+        docker login $DOCKER_PULL_REPO --username ${{ secrets.JFROG_USERNAME }} --password ${{ secrets.JFROG_API_KEY }}
+        docker pull $PULL_IMAGE
+        docker tag $PULL_IMAGE $PUSH_IMAGE  
+        docker login $DOCKER_PUSH_REPO --username ${{ secrets.JFROG_USERNAME }} --password ${{ secrets.JFROG_API_KEY }}
+        docker push $PUSH_IMAGE
+
+
+     # Setup Helm
+    - name: Install Helm
+      uses: azure/setup-helm@v1
+      with:
+          version: ${{ env.HELM_VERSION }}
+
+
+    # Deploy Helm chart
+    - name: Deploy
+      env:
+        VCAP_SERVICES: ${{ secrets[env.VCAP_SVC_SECRET] }}
+        VCAP_APPLICATION: ${{ secrets[env.VCAP_APP_SECRET] }}
+      run: |
+        COMMITID='252ff690f0bd446f9c6d2c183bd6c2ded9cb2bcd'
+        if [ -z $COMMITID ]
+        then
+          git_hash=$(git rev-parse "$GITHUB_SHA")
+          echo "$git_hash"
+        else
+          git_hash='252ff690f0bd446f9c6d2c183bd6c2ded9cb2bcd'
+          echo "$git_hash"
+        fi
+        rm -f /tmp/config /tmp/vcap_application /tmp/vcap_services
+        DEPLOY_ENV=`echo TEST | tr [:upper:] [:lower:]`
+        #cp ./scripts/deploy/vcap/$DEPLOY_ENV/aks-services.json /tmp/vcap_services
+        KRYPT=${{ secrets.TEST_KRYPT }}
+        KRYPT="$(<<< "$KRYPT" sed -e 's`[][\\/.*^$]`\\&`g')"
+        sed "s/VAR_KRYPT/$KRYPT/" ./scripts/deploy/vcap/$DEPLOY_ENV/aks-services.json > /tmp/vcap_services
+        cp ./scripts/deploy/vcap/$DEPLOY_ENV/application-aks.json /tmp/vcap_application
+        touch /tmp/config
+        echo "${{ secrets.KUBE_AZURE_AKS_CONFIG_TEST }}" | base64 -d >> /tmp/config
+        NAMESPACE=asn-test
+        echo "Deploying to $DEPLOY_ENV\n ENV"
+        echo "Helm ugrade namespace is $NAMESPACE"
+        helm upgrade --install \
+        ${{ env.HELM_CHART_NAME }} ${{ github.workspace}}/scripts/deploy/helm/charts \
+            --values ${{ github.workspace }}/scripts/deploy/helm/charts/$DEPLOY_ENV-values.yaml \
+            --set image.tag=$git_hash \
+            --set-file secrets.VCAP_SERVICES=/tmp/vcap_services \
+            --set-file secrets.VCAP_APPLICATION=/tmp/vcap_application \
+            --namespace $NAMESPACE \
+            --kubeconfig /tmp/config
+
+
+    - name: Cleanup Resource files
+      run: |
+        rm -f /tmp/config /tmp/vcap_application /tmp/vcap_services        
