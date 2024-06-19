@@ -2,10 +2,10 @@ name: 1) Docker Image CI
 
 on:
   workflow_dispatch:
-  push:
-    branches: 
-      - main
-      - feature/**
+  # push:
+  #   branches: 
+  #     - main
+  #     - feature/**
 
 env:
   IMAGE_NAME: krogertechnology-docker-dev.jfrog.io/isa
