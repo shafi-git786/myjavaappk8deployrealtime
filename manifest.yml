@@ -1,0 +1,18 @@
+---
+applications:
+  - name: asn
+    memory: 1G
+    disk_quota: 1G
+    timeout: 60
+    instances: 2
+    buildpacks:
+      - java_buildpack_offline
+    services:
+      - asn-echo
+      - asn-encryptionkey
+      - asn-desp
+      - asn-webmethods
+      - asn-datasource
+      - asn-email
+    env:
+      TZ: America/New_York
